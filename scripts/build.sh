@@ -126,6 +126,13 @@ fi
 if [ "$portable" -eq 1 ]; then
     build="$src/build-portable"
     cpu_args=(-DGGML_BACKEND_DL=ON -DGGML_NATIVE=OFF -DGGML_CPU_ALL_VARIANTS=ON)
+    # The armv9.2 CPU variants need a compiler that knows SME (GCC 14+). Older ones, like
+    # Ubuntu 22.04's GCC 11, stop the build. No Rockchip chip is armv9, so drop them there.
+    if [ "$(uname -m)" = "aarch64" ] && ! echo 'int main(void){return 0;}' \
+            | c++ -x c++ -march=armv9.2-a+dotprod+fp16+sve+i8mm+sme -o /dev/null - 2>/dev/null; then
+        sed -i '/ggml_add_cpu_backend_variant(armv9\.2_/d' "$src/ggml/src/CMakeLists.txt"
+        echo "build: compiler has no armv9.2 SME support, skipping those CPU variants (not used by Rockchip chips)"
+    fi
 else
     build="$src/build-native"
     cpu_args=(-DGGML_NATIVE=ON)
