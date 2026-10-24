@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+# llama-npu: run llama.cpp with the Rockchip NPU backend, without having to remember
+# the flags that make the NPU actually get used.
+
+set -euo pipefail
+
+self=$(readlink -f "$0")
+root=$(dirname "$self")
+bin="$root/bin"
+installer="https://raw.githubusercontent.com/anand34577/ggml-rknpu2/main/install.sh"
+
+usage() {
+    cat <<EOF
+llama-npu $(cat "$root/VERSION" 2>/dev/null || echo dev): run llama.cpp on the Rockchip NPU
+
+Usage:
+  llama-npu chat  MODEL [options]   chat with a model in the terminal
+  llama-npu serve MODEL [options]   web chat and OpenAI-compatible API on port 8080
+  llama-npu bench MODEL [options]   measure speed, with and without the NPU
+  llama-npu check                   check the board, NPU driver and runtime
+  llama-npu devices                 show what llama.cpp can use (the NPU should be listed)
+  llama-npu run   PROGRAM [options] run any bundled llama.cpp program, e.g. llama-quantize
+  llama-npu update                  install the latest release
+  llama-npu uninstall               remove llama-npu from this board
+  llama-npu version
+
+MODEL is a .gguf file, or a model on Hugging Face such as
+  Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q8_0
+which is downloaded the first time and kept in ~/.cache/llama.cpp.
+
+Options after MODEL go straight to llama.cpp (llama-cli, llama-server, llama-bench).
+Examples:
+  llama-npu chat  Qwen/Qwen2.5-1.5B-Instruct-GGUF:Q4_K_M
+  llama-npu serve ~/models/qwen2.5-1.5b-instruct-q4_k_m.gguf --host 0.0.0.0
+  llama-npu bench ~/models/qwen2.5-1.5b-instruct-q4_k_m.gguf
+
+Guide: https://github.com/anand34577/ggml-rknpu2/wiki
+EOF
+}
+
+die() { printf 'llama-npu: %s\n' "$*" >&2; exit 1; }
+
+# -m for a file, -hf for owner/repo[:quant], so both work in the same place.
+# Sets the global array m (no subshell, so die really stops the script).
+model_args() {
+    local x=$1
+    if [ -f "$x" ]; then
+        m=(-m "$x")
+    elif [[ "$x" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(:[A-Za-z0-9._-]+)?$ ]]; then
+        m=(-hf "$x")
+    else
+        die "no model file '$x'. Give a .gguf file or a Hugging Face name like Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q8_0"
+    fi
+}
+
+# The NPU only helps if the program can open its device node. Say so up front instead of
+# letting llama.cpp quietly run everything on the CPU.
+npu_hint() {
+    local node=""
+    if [ -e /dev/rknpu ]; then
+        node=/dev/rknpu
+    elif [ -d /dev/dri/by-path ]; then
+        node=$(find /dev/dri/by-path -iname '*npu*render*' 2>/dev/null | head -1)
+        [ -z "$node" ] && node=$(find /dev/dri/by-path -iname '*npu*card*' 2>/dev/null | head -1)
+        [ -n "$node" ] && node=$(readlink -f "$node")
+    fi
+    if [ -z "$node" ]; then
+        echo "llama-npu: no NPU device found, everything will run on the CPU. Run 'llama-npu check'." >&2
+    elif [ ! -r "$node" ] || [ ! -w "$node" ]; then
+        echo "llama-npu: no permission to use the NPU ($node), everything will run on the CPU." >&2
+        echo "           Run 'llama-npu check' to see how to fix it." >&2
+    fi
+}
+
+run_tool() {
+    local tool=$1
+    shift
+    [ -x "$bin/$tool" ] || die "$tool is not part of this install ($bin)"
+    exec "$bin/$tool" "$@"
+}
+
+need_model() {
+    [ $# -ge 1 ] && [ "${1#-}" = "$1" ] || die "which model? Example: llama-npu $cmd Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q8_0"
+}
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+case "$cmd" in
+    chat)
+        need_model "$@"
+        model_args "$1"; shift
+        npu_hint
+        # --no-repack: llama.cpp otherwise repacks Q4_0/Q4_K/Q8_0/... weights into a
+        # CPU-only layout on RK3588, and then the NPU gets almost nothing to do
+        run_tool llama-cli "${m[@]}" --no-repack "$@"
+        ;;
+    serve|server)
+        need_model "$@"
+        model_args "$1"; shift
+        npu_hint
+        echo "llama-npu: open http://localhost:8080 in a browser once the model has loaded" >&2
+        run_tool llama-server "${m[@]}" --no-repack "$@"
+        ;;
+    bench)
+        need_model "$@"
+        model_args "$1"; shift
+        npu_hint
+        [ $# -eq 0 ] && set -- -p 512 -n 64
+        # repack 0 lets the NPU take the prompt, repack 1 is the CPU-only best case. Added
+        # unless asked otherwise: llama-bench repacks by default, which leaves the NPU idle
+        # while the table still says RKNPU2
+        case " $* " in
+            *" --repack "*) ;;
+            *) set -- --repack 0,1 "$@" ;;
+        esac
+        run_tool llama-bench "${m[@]}" "$@"
+        ;;
+    check)
+        exec sh "$root/check.sh"
+        ;;
+    devices)
+        run_tool llama-cli --list-devices
+        ;;
+    run)
+        if [ $# -eq 0 ]; then
+            for f in "$bin"/llama-*; do [ -x "$f" ] && basename "$f"; done
+            exit 0
+        fi
+        tool=$1; shift
+        run_tool "$tool" "$@"
+        ;;
+    update|upgrade)
+        command -v curl >/dev/null || die "curl is not installed"
+        curl -fsSL "$installer" | bash -s -- --prefix "$root"
+        ;;
+    uninstall)
+        link="$HOME/.local/bin/llama-npu"
+        echo "This removes $root"
+        [ -L "$link" ] && echo "and the command $link"
+        if [ -t 0 ]; then
+            read -r -p "Continue? [y/N] " a
+            case "$a" in y|Y|yes) ;; *) echo "Nothing removed."; exit 0 ;; esac
+        fi
+        [ -L "$link" ] && [ "$(readlink -f "$link")" = "$self" ] && rm -f "$link"
+        rm -rf "$root"
+        echo "Removed. Downloaded models are still in ~/.cache/llama.cpp, delete that folder to free the space."
+        ;;
+    version|--version|-v)
+        echo "llama-npu $(cat "$root/VERSION" 2>/dev/null || echo dev)"
+        [ -x "$bin/llama-cli" ] && "$bin/llama-cli" --version 2>&1 | head -2
+        ;;
+    help|--help|-h)
+        usage
+        ;;
+    *)
+        echo "llama-npu: unknown command '$cmd'" >&2
+        echo >&2
+        usage >&2
+        exit 2
+        ;;
+esac
