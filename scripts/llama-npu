@@ -80,7 +80,9 @@ run_tool() {
 }
 
 need_model() {
-    [ $# -ge 1 ] && [ "${1#-}" = "$1" ] || die "which model? Example: llama-npu $cmd Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q8_0"
+    if [ $# -eq 0 ] || [ "${1#-}" != "$1" ]; then
+        die "which model? Example: llama-npu $cmd Qwen/Qwen2.5-0.5B-Instruct-GGUF:Q8_0"
+    fi
 }
 
 cmd=${1:-help}
