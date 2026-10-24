@@ -1,0 +1,19 @@
+name: Idea or request
+description: Something ggml-rknpu2 should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem, not the solution. What gets in your way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: input
+    id: board
+    attributes:
+      label: Your board, if it matters

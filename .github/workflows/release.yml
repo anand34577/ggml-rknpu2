@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Ubuntu 22.04 keeps the ready build working on glibc 2.35+ (Ubuntu 22.04+, Debian 12+)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: version matches the tag
+        run: test "v$(cat VERSION)" = "${GITHUB_REF_NAME}"
+
+      - name: dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+
+      - name: correctness tests
+        run: tests/run.sh
+
+      - name: build, every CPU variant in one package
+        run: scripts/build.sh --portable --no-bundle-runtime --prefix dist/ggml-rknpu2 --jobs "$(nproc)"
+
+      - name: smoke test against Rockchip's real runtime
+        run: |
+          set -eu
+          # the runtime is only borrowed for this test, it is not packaged
+          cp -a dist/ggml-rknpu2 /tmp/smoke
+          cp .cache/rknn-runtime-*/lib/librknnrt.so /tmp/smoke/bin/
+          ldd /tmp/smoke/bin/libggml-rknpu2.so | tee /dev/stderr | grep -q "librknnrt.so => /tmp/smoke/bin/"
+          /tmp/smoke/llama-npu version
+          /tmp/smoke/bin/llama-cli --list-devices
+
+      - name: package
+        run: |
+          set -eu
+          # Rockchip's runtime must never be redistributed, the installer fetches it from Rockchip
+          if [ -e dist/ggml-rknpu2/bin/librknnrt.so ]; then echo "librknnrt.so in the package"; exit 1; fi
+          tar -C dist -czf ggml-rknpu2-linux-arm64.tar.gz ggml-rknpu2
+          sha256sum ggml-rknpu2-linux-arm64.tar.gz > ggml-rknpu2-linux-arm64.tar.gz.sha256
+          ls -lh ggml-rknpu2-linux-arm64.tar.gz
+
+      - name: release notes
+        run: |
+          set -eu
+          v=${GITHUB_REF_NAME#v}
+          {
+            awk -v v="$v" '$0 ~ "^## \\[" v "\\]" { on = 1; next } /^## \[/ { on = 0 } on' CHANGELOG.md
+            echo
+            cat .github/release-notes.md
+          } > notes.md
+          cat notes.md
+
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "ggml-rknpu2 ${TAG#v}" --notes-file notes.md
+          gh release upload "$TAG" ggml-rknpu2-linux-arm64.tar.gz ggml-rknpu2-linux-arm64.tar.gz.sha256 install.sh --clobber
+
+  verify-install:
+    # run the one-line installer exactly as a user would, against the release just published
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04-arm, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: install
+        run: curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${GITHUB_REF_NAME}/install.sh" | bash -s -- --version "${GITHUB_REF_NAME}"
+      - name: use
+        run: |
+          set -eu
+          export PATH="$HOME/.local/bin:$PATH"
+          llama-npu version
+          llama-npu devices
+          llama-npu help | head -5
+          test -e "$HOME/.local/share/ggml-rknpu2/bin/librknnrt.so"

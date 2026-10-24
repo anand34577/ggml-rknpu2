@@ -1,0 +1,39 @@
+name: Something doesn't work
+description: Installing, running, or results that look wrong
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The [Troubleshooting](https://github.com/anand34577/ggml-rknpu2/wiki/Troubleshooting) page solves most problems, so check it first.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Output of `llama-npu check`
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: board
+    attributes:
+      label: Board and OS image
+      placeholder: e.g. Orange Pi 5 Plus, Armbian 25.8 vendor kernel
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Output of `llama-npu version`
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: Run the failing command again with `-v` added at the end and paste the output (the start and the end are the useful parts).
+      render: text
