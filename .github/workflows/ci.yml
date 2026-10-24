@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: shellcheck
+        run: shellcheck -x install.sh scripts/*.sh scripts/llama-npu tests/*.sh
+      - name: patch applies to the pinned llama.cpp
+        run: scripts/build.sh --prepare-only
+
+  test:
+    # no board in CI: the backend runs against a strict CPU stand-in for librknnrt
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: correctness tests, all five chips
+        run: tests/run.sh
+      - name: end-to-end with a small model, NPU path against CPU
+        run: tests/e2e.sh
+
+  board-build:
+    # the source build users run on their board, on the oldest system the ready build supports
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - name: dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev
+      - name: build
+        run: scripts/build.sh --jobs "$(nproc)"
+      - name: smoke test
+        run: |
+          dist/ggml-rknpu2/llama-npu version
+          dist/ggml-rknpu2/llama-npu devices
+          dist/ggml-rknpu2/llama-npu check || true

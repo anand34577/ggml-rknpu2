@@ -1,0 +1,35 @@
+# Publishes docs/wiki/*.md to the repository's GitHub wiki, so the wiki is reviewed and
+# versioned like code. Edit the pages in docs/wiki, not in the wiki web editor (changes
+# made there are overwritten).
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/wiki/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency: wiki
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Push to the wiki
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          git clone "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+          rsync -a --delete --exclude .git docs/wiki/ wiki/
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "wiki is up to date"; exit 0; fi
+          git commit -m "Update wiki from ${GITHUB_SHA::7}"
+          git push

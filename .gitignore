@@ -1,0 +1,20 @@
+# build output and downloads (llama.cpp, Rockchip runtime, test models)
+/.cache/
+/dist/
+*.o
+*.a
+*.so
+*.tar.gz
+*.gguf
+
+# Rockchip's files are downloaded, never committed
+librknnrt.so*
+rknn_api.h
+rknn_matmul_api.h
+
+# editors and tools
+.vscode/
+.idea/
+.claude/
+*.swp
+*.log

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and benchmark results
+    url: https://github.com/anand34577/ggml-rknpu2/discussions
+    about: Ask how to do something, or share how fast it runs on your board.
+  - name: Guides
+    url: https://github.com/anand34577/ggml-rknpu2/wiki
+    about: Installing, first chat, browser chat, models, troubleshooting.
+  - name: Security problem
+    url: https://github.com/anand34577/ggml-rknpu2/security/advisories/new
+    about: Report it privately, please.
