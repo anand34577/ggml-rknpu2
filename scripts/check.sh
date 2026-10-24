@@ -15,8 +15,9 @@ echo "ggml-rknpu2 board check"
 echo
 
 # 1. which chip
-compat=$(cat /proc/device-tree/compatible 2>/dev/null | tr '\0' ' ')
-model=$(cat /proc/device-tree/model 2>/dev/null | tr -d '\0')
+# the group keeps "no such file" quiet on machines without a device tree
+compat=$( { tr '\0' ' ' < /proc/device-tree/compatible; } 2>/dev/null)
+model=$( { tr -d '\0' < /proc/device-tree/model; } 2>/dev/null)
 soc=""
 for c in rk3588 rk3576 rk3566 rk3568 rk3562; do
     case "$compat" in *"$c"*) soc=$c ;; esac
